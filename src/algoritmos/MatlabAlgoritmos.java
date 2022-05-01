@@ -12,12 +12,9 @@ import java.util.concurrent.Future;
  *
  * @author LENOVO
  */
-public class Algoritmos {
+public class MatlabAlgoritmos {
     
-    public Algoritmos(){
-    }
-    
-    public static boolean Correlacion_Cruzada_Normalizada(String imagen, String plantilla){
+    public boolean Correlacion_Cruzada_Normalizada(String imagen, String plantilla){
         try {
             // Start Matlab
             Future<MatlabEngine> engine = MatlabEngine.startMatlabAsync();  

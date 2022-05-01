@@ -4,17 +4,23 @@
  */
 package frames;
 
+import algoritmos.MatlabAlgoritmos;
 import java.awt.Color;
 import java.awt.Image;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.util.Vector;
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
+import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
+import db.Stored_Procedures;
 
 /**
  *
@@ -24,8 +30,8 @@ public class CourseRoom_Analyzer_Frame extends javax.swing.JFrame {
 
     private DatagramSocket datagramSocket;
     private Conexion_Servidor conexion_Servidor;
-    private int Id_Usuario;
-    
+    private MatlabAlgoritmos matlab;
+    private Stored_Procedures stored_Procedures;
     
     /**
      * Creates new form CourseRoom_Notifier_Frame
@@ -42,6 +48,8 @@ public class CourseRoom_Analyzer_Frame extends javax.swing.JFrame {
         descripcion_JTextPane.setForeground(color_Azul_Oscuro);
         descripcion_JTextPane.setCaretColor(color_Azul_Oscuro);
         descripcion_JScrollPane.setForeground(color_Azul_Oscuro);
+        matlab = new MatlabAlgoritmos();
+        stored_Procedures = new Stored_Procedures();
         
         Image logo_Imagen;
         try {
@@ -152,41 +160,29 @@ public class CourseRoom_Analyzer_Frame extends javax.swing.JFrame {
             
             Agregar_Texto("Esperando Conexión Con CourseRoom Server...\n");
             
-            byte[] entryBuffer = new byte[16];
+            byte[] entryBuffer = new byte[4096];
             DatagramPacket datagramPacket = new DatagramPacket(entryBuffer,entryBuffer.length);
-            String mensaje;
-            String valor;
-            int longitud;
-            int indice;
+            Vector<Vector<Object>> vector;
             while(true){
                 
                 try {
                     
                     datagramSocket.receive(datagramPacket);
                     
-                    //Usuario:
-                    indice = 0;
-                    longitud = (int)entryBuffer[indice];
-                    byte[] arreglo = new byte[longitud];
+                    try(ByteArrayInputStream byteArray = new ByteArrayInputStream(entryBuffer)){
+                        try(ObjectInputStream inputStream = new ObjectInputStream(byteArray)){
+                            vector = (Vector<Vector<Object>>) inputStream.readObject();
+                            Agregar_Texto("Se ha Obtenido Una Nueva Solicitud Para Analisis\n");
                     
-                    for(int i = 1; i <= longitud; i++){
-                        arreglo[i-1] = entryBuffer[i];
+                            Analizar(vector);
+                        } catch (ClassNotFoundException ex) {
+                            Agregar_Texto(ex.getMessage()+"\n");
+                        }
                     }
                     
-                    valor = ConvertirArreglo(arreglo);
-                    
-                    Id_Usuario = Integer.parseInt(valor);
-                    
-                    
-                    mensaje = "El Usuario "+String.valueOf(Id_Usuario)+" Tiene Una Nueva Notificación"+"\n";
-                    Agregar_Texto(mensaje);
-                    
-                    Enviar_Aviso(Id_Usuario);
-
                 } catch (IOException ex) {
                     Agregar_Texto(ex.getMessage());
                 }
-                
             }
         }
     }
@@ -195,41 +191,100 @@ public class CourseRoom_Analyzer_Frame extends javax.swing.JFrame {
         return new String(arreglo);
     }
 
-    private void Enviar_Aviso(int id_Usuario){
+    private void Analizar(Vector<Vector<Object>> vector){
         
-        String simpleMessage = String.valueOf(id_Usuario);
-        byte bandera = 0;
+       if(vector.size() > 2){
+           
+           //Obtener tipo de analisis:
+           Vector<Object> tipo_Analisis = vector.remove(vector.size()-1);
+           
+           int id_Profesor = (int)tipo_Analisis.remove(0);
+           int id_Usuario = (int)tipo_Analisis.remove(0);
+           String tipo = (String)tipo_Analisis .remove(0);
+           
+           if(tipo.equals("Imagen")){
+               Agregar_Texto("Analisis De Imagenes Por El Algoritmo CCN\n");
+               
+               //Realizar el análisis:
+               
+               Vector<Object> imagen_Validar = vector.remove(vector.size()-1);
+               
+               int id_Tarea_Validar = (int) imagen_Validar.remove(0);
+               String nombre_Imagen_Validar = (String) imagen_Validar.remove(0);
+               
+               String nombre_Imagen_A_Validar = String.valueOf(id_Tarea_Validar) + "_" +nombre_Imagen_Validar;
+               
+               int id_Tarea;
+               String nombre_Imagen;
+               boolean respuesta;
+               while(!vector.isEmpty()){
+                    
+                   imagen_Validar = vector.remove(0);
+                   
+                    id_Tarea = (int) imagen_Validar.remove(0);
+                    nombre_Imagen = (String) imagen_Validar.remove(0);
+               
+                    nombre_Imagen = String.valueOf(id_Tarea) + "_" +nombre_Imagen;
+                    
+                    respuesta = matlab.Correlacion_Cruzada_Normalizada(nombre_Imagen, nombre_Imagen_A_Validar);
+                    
+                    //Hay plagio
+                    if(respuesta){
+                        Enviar_Aviso(id_Usuario, id_Profesor,id_Tarea,nombre_Imagen_Validar);
+                        break;
+                    }
+                   
+               }
+               
+           }
+       }
+    }
+    
+    private void Enviar_Aviso(int id_Usuario, int id_Profesor, int id_Tarea, String nombre_Archivo){
         
-        byte[] buffer = new byte[16];
-        
-        //Usuario:
-        buffer[0] = (byte) simpleMessage.length();
-			
-        //Creamos un valor auxiliar (copia) que nos obtendrá los bytes de la cadena.
-        byte[] copia = simpleMessage.getBytes();
+        SwingUtilities.invokeLater(() -> {
+            
+            Vector<Object> response = 
+                    stored_Procedures.sp_AgregarAviso(id_Profesor, id_Usuario, id_Tarea, nombre_Archivo);
+            
+            if((int)response.remove(0) > 0){
+            
+                String simpleMessage = String.valueOf(id_Profesor);
+                byte bandera = 0;
 
-        //Creamos la copia del valor auxiliar hacia nuestro arreglo de bytes
-        for(int i = 1; i <= simpleMessage.length();i++){
-            buffer[i] = copia[i-1];
-        }
+                byte[] buffer = new byte[16];
+
+                //Usuario:
+                buffer[0] = (byte) simpleMessage.length();
+
+                //Creamos un valor auxiliar (copia) que nos obtendrá los bytes de la cadena.
+                byte[] copia = simpleMessage.getBytes();
+
+                //Creamos la copia del valor auxiliar hacia nuestro arreglo de bytes
+                for(int i = 1; i <= simpleMessage.length();i++){
+                    buffer[i] = copia[i-1];
+                }
+
+                while(bandera < 60){
+                    try(DatagramSocket socketSender = new DatagramSocket()){
+
+                        DatagramPacket datagramPacket = new DatagramPacket(buffer,buffer.length,
+                                InetAddress.getByName("localhost")
+                                ,9001);
+
+                        socketSender.send(datagramPacket);
+                        bandera = 100;
+                    } catch (SocketException ex) {
+                        System.err.println(ex.getMessage());
+                        bandera++;
+                    } catch (IOException ex) {
+                        System.err.println(ex.getMessage());
+                        bandera++;
+                    }    
+                }
+            }
         
-        while(bandera < 60){
-            try(DatagramSocket socketSender = new DatagramSocket()){
-
-                DatagramPacket datagramPacket = new DatagramPacket(buffer,buffer.length,
-                        InetAddress.getByName("localhost")
-                        ,9001);
-
-                socketSender.send(datagramPacket);
-                bandera = 100;
-            } catch (SocketException ex) {
-                System.err.println(ex.getMessage());
-                bandera++;
-            } catch (IOException ex) {
-                System.err.println(ex.getMessage());
-                bandera++;
-            }    
-        }
+        });
     }
     
     private void Agregar_Texto(String texto){
@@ -237,7 +292,7 @@ public class CourseRoom_Analyzer_Frame extends javax.swing.JFrame {
             Document doc = descripcion_JTextPane.getDocument();
             doc.insertString(doc.getLength(), texto, null);
         } catch(BadLocationException exc) {
-            
+            System.err.println(exc.getMessage());
         }
     }
     
